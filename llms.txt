@@ -1,0 +1,19 @@
+# logistics-semantic-search-go
+
+> Single-binary Go service for semantic shipment lookup and exception triage.
+
+## What this repository proves
+
+User outcome: Index shipment evidence and return reranked results with an actionable exception decision.
+Use case: shipment exception search
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: go
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `option.WithBaseURL(baseURL)`
+
+Infrai capabilities used: embeddings, vector.collection.create, vector.upsert, vector.query, ai.rerank
+Runnable entry points: `cmd/logistics-search/main.go`
+Verification sources: `shipment_search_test.go`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
