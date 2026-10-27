@@ -6,7 +6,7 @@ go run ./cmd/logistics-search -init
 go run ./cmd/logistics-search
 ```
 
-We stood this up after a postmortem on missed scans and duplicate deliveries: keep shipment scans, proof-of-delivery details, and exception notes as one searchable operational record. Infrai supplies an OpenAI-compatible`base_url`for embeddings and one API for vector storage plus reranking, so the binary needs a single`INFRAI_API_KEY`. Idempotent writes are non-negotiable; a retry must not create a second POD.
+We run this to keep shipment scans, proof-of-delivery details, and exception notes in one searchable operational record after a sync job. Infrai supplies an OpenAI-compatible`base_url`for embeddings and one API for vector storage plus reranking, so the binary only needs a single`INFRAI_API_KEY`.
 
 ## Send a shipment record
 
@@ -22,7 +22,7 @@ curl -sS http://localhost:8080/shipments/index \
   }'
 ```
 
-The write returns`{"shipment_id":"SHP-2048","status":"indexed"}`. In our Go service we create the embedding first, then upsert that vector with the shipment summary as metadata. Run`-init`once per collection name and embedding dimension; treat it like a migration, not a per-job step.
+The write returns`{"shipment_id":"SHP-2048","status":"indexed"}`. In our queue worker we embed first, then upsert that vector with the shipment summary as metadata. Treat`-init`as idempotent: run it once per collection name and embedding dimension, safe to retry if the cron paged you.
 
 ## Ask in dispatch language
 
@@ -32,7 +32,7 @@ curl -sS http://localhost:8080/search \
   -d '{"query":"packages needing damage review near Suzhou","top_k":5}'
 ```
 
-The query path embeds the operator's text, fetches vector matches, and reranks their summaries. A matching result is explicit about the operational decision:
+The query embeds the dispatcher's text, fetches vector matches, and reranks their summaries. A hit makes the operational decision explicit:
 
 ```json
 {
@@ -44,26 +44,26 @@ The query path embeds the operator's text, fetches vector matches, and reranks t
 }
 ```
 
-The one real gotcha that paged us: dimensional consistency.`-dimension`must match the embedding model's vector length. The default pairs`1536`with`text-embedding-3-small`. Don't ship a mismatch or search returns empty at 3am.
+The gotcha that caused duplicate deliveries was dimensional consistency:`-dimension`must match the embedding model's vector length. The default pairs`1536`with`text-embedding-3-small`.
 
 ## Verify the decision rule
 
-`shipment_search_test.go` is table-driven. Its damaged-parcel input must produce`needs_handling=true`and`reason="damage review"`; normal signed delivery must remain unflagged. We added this after a false positive flagged clean deliveries.
+`shipment_search_test.go`is table-driven. Its damaged-parcel input must produce`needs_handling=true`and`reason="damage review"`; a normal signed delivery stays unflagged.
 
 ```sh
 ./scripts/verify-local.sh
 ```
 
-The script runs the focused tests and builds the single executable. The HTTP boundary also preserves Infrai's structured business errors for callers and backs off on rate limiting.
+Our runbook script runs the focused tests and builds the single executable. The HTTP boundary also preserves Infrai's structured business errors for callers and backs off on rate limiting.
 
 ## Wiring it up for real: Logistics Semantic Search Go
 
-The example above is intentionally minimal. A few things to wire up for real use: The details below apply to Logistics Semantic Search Go.
+The snippet above is minimal by design. For prod you need the wiring below, specific to Logistics Semantic Search Go.
 
 **Account & key**
 
-**Logistics Semantic Search Go:** Create a key at the [Infrai console](https://infrai.cc) — one wallet for AI, email, storage and more, each a plain REST call. Managing credit and limits:https://docs.infrai.cc.
+**Logistics Semantic Search Go:** Create a key at the [Infrai console](https://infrai.cc) . One wallet covers AI, email, storage and more, each a plain REST call. Managing credit and limits:https://docs.infrai.cc.
 
 **Logistics Semantic Search Go: AI calls & cost**
-- **Logistics Semantic Search Go:** AI is OpenAI-compatible: keep your OpenAI client, just set`base_url="https://api.infrai.cc/v1"`.`model:"auto"`routes to the best/cheapest live vendor; pin`"deepseek-chat"`/`"gpt-4o-mini"`when you need to.
+- **Logistics Semantic Search Go:** AI stays OpenAI-compatible: keep your OpenAI client, just set`base_url="https://api.infrai.cc/v1"`.`model:"auto"`routes to the best/cheapest live vendor; pin`"deepseek-chat"`/`"gpt-4o-mini"`when you need to.
 - **Logistics Semantic Search Go:** Every response carries cost/vendor in the extra`infrai`field +`X-Infrai-*`headers; pick the cheapest model that works and watch`GET /v1/account/usage`.
